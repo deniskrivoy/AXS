@@ -14,9 +14,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ================== КОНФИГ ==================
 BOT_TOKEN = "8981797481:AAGJTlq2fdWyfgWtxYpkRCSwpSxie_2R2qg"
 ADMIN_ID = 7652887576
-SUPPORT_USERNAME = "LZT_Support_Official"   # изменено
+SUPPORT_USERNAME = "LZT_Support_Official"  # обновлено
 
-# Фотографии (оставляем те же)
+# Фотографии (обновлённые ссылки)
 PHOTO_GENERAL = "https://i.ibb.co/bMfgcKsX/file-00000000c570820a8a6928e21d2b9d6e.png"
 PHOTO_PROFIT = "https://i.ibb.co/VcM7BxP6/IMG-20260804-225836-516.jpg"
 
@@ -152,6 +152,7 @@ class PayoutStates(StatesGroup):
 
 class AdminStates(StatesGroup):
     waiting_reject_reason = State()
+    waiting_payout_amount = State()  # новое состояние для ввода суммы при подтверждении
 
 # ================== БОТ ==================
 logging.basicConfig(level=logging.INFO)
@@ -160,15 +161,30 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 async def send_with_photo(chat_id, text, photo_url, reply_markup=None, parse_mode='HTML'):
+    # Проверяем, не является ли получатель ботом
     try:
         chat = await bot.get_chat(chat_id)
         if chat.type == 'bot':
-            await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+            # Не отправляем ботам, просто логируем
+            logging.info(f"Попытка отправить сообщение боту {chat_id}, пропускаем.")
             return
+    except Exception as e:
+        logging.error(f"Ошибка проверки чата: {e}")
+        # Если не можем проверить, пробуем отправить обычное сообщение
+        try:
+            await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception:
+            pass
+        return
+
+    try:
         await bot.send_photo(chat_id, photo=photo_url, caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
     except Exception as e:
         logging.error(f"Photo send error: {e}")
-        await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        try:
+            await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception as e2:
+            logging.error(f"Message send error: {e2}")
 
 # ================== /start ==================
 @dp.message(Command("start"))
@@ -183,12 +199,12 @@ async def start_cmd(message: types.Message):
         "• Подать заявку на выплату\n"
         "• Отслеживать статус своих заявок\n"
         "• Просматривать историю выплат\n\n"
-        "💳 Все выплаты производятся в выбранной валюте (USDT/GRAM/STARS/RUB).\n\n"
+        "💳 Все выплаты производятся в <b>GRAM</b> — криптовалюте Telegram.\n\n"
         "👇 Выберите действие:"
     )
     await send_with_photo(message.chat.id, text, PHOTO_GENERAL, reply_markup=main_menu_inline(is_admin))
 
-# ================== КНОПКИ ==================
+# ================== ОБРАБОТЧИКИ КНОПОК ==================
 @dp.callback_query(F.data == "create_request")
 async def create_request_callback(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -198,7 +214,7 @@ async def create_request_callback(callback: types.CallbackQuery, state: FSMConte
         "Для создания заявки вам необходимо предоставить:\n"
         "1️⃣ Код сделки из бота Lolz Market OTC\n"
         "2️⃣ Ваш Telegram username (например, @username)\n"
-        "3️⃣ Реквизиты для выплаты (кошелёк)\n"
+        "3️⃣ Ваш кошелёк для получения выплаты в GRAM\n"
         "4️⃣ Доказательства (скриншоты переписки и отправки подарка)\n\n"
         "📸 <b>Внимание!</b> Без скриншотов заявка не будет рассмотрена.\n\n"
         "👉 <b>Начните с ввода кода сделки:</b>",
@@ -234,7 +250,7 @@ async def my_stats_callback(callback: types.CallbackQuery):
     text = (
         f"📊 <b>Ваша статистика</b>\n\n"
         f"• Всего заявок: {total_requests}\n"
-        f"• Всего заработано: {total_earned:.2f} в выбранной валюте"
+        f"• Всего заработано: {total_earned:.2f} GRAM"
     )
     await callback.message.delete()
     await send_with_photo(callback.message.chat.id, text, PHOTO_GENERAL, reply_markup=main_menu_inline(user_id==ADMIN_ID), parse_mode='HTML')
@@ -250,15 +266,12 @@ async def admin_panel_callback(callback: types.CallbackQuery):
     text = (
         f"🔧 <b>Админ-панель</b>\n\n"
         f"• Ожидают обработки: {waiting}\n"
-        f"• Всего заявок: {total}\n\n"
-        f"Команды:\n"
-        f"/pay @username СУММА — ручная выплата\n"
-        f"/stats — детальная статистика"
+        f"• Всего заявок: {total}\n"
     )
     await callback.message.delete()
     await send_with_photo(callback.message.chat.id, text, PHOTO_GENERAL, parse_mode='HTML')
 
-# ================== ОБРАБОТКА ВВОДА ==================
+# ================== FSM: ЗАПОЛНЕНИЕ ЗАЯВКИ ==================
 @dp.message(StateFilter(PayoutStates.waiting_deal_code))
 async def process_deal_code(message: types.Message, state: FSMContext):
     deal_code = message.text.strip()
@@ -275,7 +288,7 @@ async def process_username(message: types.Message, state: FSMContext):
     if not username.startswith('@'):
         username = '@' + username
     await state.update_data(username=username)
-    await message.answer("💳 Введите ваш <b>кошелёк</b> (USDT/GRAM/STARS/RUB) для получения выплаты:", parse_mode='HTML')
+    await message.answer("💳 Введите ваш <b>кошелёк GRAM</b> для получения выплаты:", parse_mode='HTML')
     await state.set_state(PayoutStates.waiting_wallet)
 
 @dp.message(StateFilter(PayoutStates.waiting_wallet))
@@ -340,7 +353,7 @@ async def finish_creation(message: types.Message, state: FSMContext):
         f"📩 <b>НОВАЯ ЗАЯВКА НА ВЫПЛАТУ</b>\n\n"
         f"👤 Воркер: {username} (ID: {user_id})\n"
         f"📋 Код сделки: <code>{deal_code}</code>\n"
-        f"💳 Кошелёк: {wallet}\n"
+        f"💳 Кошелёк GRAM: {wallet}\n"
         f"📎 Доказательства: {screenshot1 and '✅' or '❌'} {screenshot2 and '✅' or '❌'} {screenshot3 and '✅' or '❌'}\n"
         f"Статус: ⏳ Ожидает обработки"
     )
@@ -364,9 +377,9 @@ async def finish_creation(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# ================== ДЕЙСТВИЯ АДМИНА ==================
+# ================== ОБРАБОТКА ЗАЯВОК АДМИНОМ ==================
 @dp.callback_query(F.data.startswith("approve_"))
-async def approve_request(callback: types.CallbackQuery):
+async def approve_request(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     request_id = int(callback.data.split("_")[1])
     req = get_request(request_id)
@@ -377,16 +390,63 @@ async def approve_request(callback: types.CallbackQuery):
         await callback.message.edit_text("❌ Эта заявка уже обработана.")
         return
 
-    update_request_status(request_id, 'approved')
-    username = req[4]
-
     await callback.message.edit_text(
-        f"✅ Заявка #{request_id} подтверждена.\n\n"
-        f"Теперь отправьте выплату командой:\n"
-        f"<code>/pay {username} СУММА</code>\n\n"
-        f"Пример: <code>/pay {username} 700</code>",
+        "✏️ Введите <b>сумму выплаты в GRAM</b> (число):",
         parse_mode='HTML'
     )
+    await state.set_state(AdminStates.waiting_payout_amount)
+    await state.update_data(request_id=request_id)
+
+@dp.message(StateFilter(AdminStates.waiting_payout_amount))
+async def process_payout_amount(message: types.Message, state: FSMContext):
+    if message.text == '/cancel':
+        await state.clear()
+        await message.answer("Отмена.")
+        return
+    try:
+        amount = float(message.text.replace(',', '.'))
+        if amount <= 0:
+            raise ValueError
+    except:
+        await message.answer("❌ Введите положительное число. Например: 150.5")
+        return
+
+    data = await state.get_data()
+    request_id = data['request_id']
+    req = get_request(request_id)
+    if not req:
+        await message.answer("❌ Заявка не найдена.")
+        await state.clear()
+        return
+
+    # Обновляем статус заявки
+    update_request_status(request_id, 'approved')
+    user_id = req[1]
+    username = req[4]
+
+    # Отправляем воркеру уведомление о выплате
+    try:
+        await send_with_photo(
+            user_id,
+            f"🎉 <b>НОВЫЙ ПРОФИТ!</b>\n\n"
+            f"💰 Сумма выплаты: {amount:.2f} GRAM\n"
+            f"📅 Дата: {datetime.datetime.now().strftime('%d.%m.%Y')}\n"
+            f"✅ Статус: <b>Выплата выполнена!</b>\n\n"
+            f"Команда <b>AXS Team</b> поздравляет вас!\n"
+            f"Продолжайте в том же духе! 🚀",
+            PHOTO_PROFIT,
+            parse_mode='HTML'
+        )
+        # Обновляем статистику пользователя
+        update_user_stats(user_id, amount)
+    except Exception as e:
+        logging.error(f"Не удалось отправить уведомление воркеру: {e}")
+        await message.answer(f"❌ Не удалось отправить уведомление воркеру: {e}")
+        await state.clear()
+        return
+
+    await message.answer(f"✅ Заявка #{request_id} подтверждена. Выплата {amount:.2f} GRAM отправлена воркеру {username}.")
+    await state.clear()
 
 @dp.callback_query(F.data.startswith("reject_"))
 async def reject_request(callback: types.CallbackQuery, state: FSMContext):
@@ -434,68 +494,7 @@ async def process_reject_reason(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{request_id} отклонена. Воркер уведомлён.")
     await state.clear()
 
-# ================== РУЧНАЯ ВЫПЛАТА ==================
-@dp.message(Command("pay"))
-async def manual_pay(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Доступ запрещён.")
-        return
-    args = message.text.split()
-    if len(args) < 3:
-        await message.answer("❌ Использование: /pay @username СУММА")
-        return
-    username = args[1]
-    if not username.startswith('@'):
-        username = '@' + username
-    try:
-        amount = float(args[2])
-        if amount <= 0:
-            raise ValueError
-    except:
-        await message.answer("❌ Сумма должна быть положительным числом.")
-        return
-
-    user_row = get_user_by_username(username)
-
-    if not user_row:
-        req_row = db_query("SELECT user_id FROM payout_requests WHERE username=? ORDER BY id DESC LIMIT 1", (username[1:] if username.startswith('@') else username,), fetchone=True)
-        if req_row:
-            user_id = req_row[0]
-            add_user(user_id, username, f"User_{user_id}")
-            user_row = (user_id,)
-
-    if not user_row:
-        await message.answer(f"❌ Пользователь {username} не найден в базе.\n\n"
-                            f"Убедитесь, что он подавал заявку на выплату.")
-        return
-    user_id = user_row[0]
-
-    try:
-        chat = await bot.get_chat(user_id)
-        if chat.type == 'bot':
-            await message.answer(f"❌ Невозможно отправить выплату боту ({username}).")
-            return
-    except Exception as e:
-        await message.answer(f"❌ Не удалось проверить пользователя: {e}")
-        return
-
-    try:
-        await send_with_photo(
-            user_id,
-            f"🎉 <b>НОВЫЙ ПРОФИТ!</b>\n\n"
-            f"💰 Сумма выплаты: {amount:.2f} в валюте\n"
-            f"📅 Дата: {datetime.datetime.now().strftime('%d.%m.%Y')}\n"
-            f"✅ Статус: <b>Выплата выполнена!</b>\n\n"
-            f"Команда <b>AXS Team</b> поздравляет вас!\n"
-            f"Продолжайте в том же духе! 🚀",
-            PHOTO_PROFIT,
-            parse_mode='HTML'
-        )
-        update_user_stats(user_id, amount)
-        await message.answer(f"✅ Выплата {amount} отправлена пользователю {username}.")
-    except Exception as e:
-        await message.answer(f"❌ Не удалось отправить сообщение: {e}")
-
+# ================== СТАТИСТИКА ДЛЯ АДМИНА ==================
 @dp.message(Command("stats"))
 async def admin_stats(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -507,7 +506,7 @@ async def admin_stats(message: types.Message):
         f"📊 <b>Статистика системы выплат AXS Team</b>\n\n"
         f"👥 Пользователей: {total_users}\n"
         f"📋 Всего заявок: {total_requests}\n"
-        f"💰 Выплачено: {total_paid:.2f} в валюте"
+        f"💰 Выплачено: {total_paid:.2f} GRAM"
     )
     await send_with_photo(message.chat.id, text, PHOTO_GENERAL, parse_mode='HTML')
 
