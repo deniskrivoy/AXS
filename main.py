@@ -16,7 +16,7 @@ BOT_TOKEN = "8981797481:AAGJTlq2fdWyfgWtxYpkRCSwpSxie_2R2qg"
 ADMIN_ID = 7652887576
 SUPPORT_USERNAME = "LZT_Support_Official"
 
-# Фотографии (обновлённые ссылки)
+# Фотографии
 PHOTO_GENERAL = "https://i.ibb.co/bMfgcKsX/file-00000000c570820a8a6928e21d2b9d6e.png"
 PHOTO_PROFIT = "https://i.ibb.co/VcM7BxP6/IMG-20260804-225836-516.jpg"
 
@@ -161,7 +161,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
 async def send_with_photo(chat_id, text, photo_url, reply_markup=None, parse_mode='HTML'):
-    # Проверяем, не является ли получатель ботом
     try:
         chat = await bot.get_chat(chat_id)
         if chat.type == 'bot':
@@ -169,7 +168,6 @@ async def send_with_photo(chat_id, text, photo_url, reply_markup=None, parse_mod
             return
     except Exception as e:
         logging.error(f"Ошибка проверки чата: {e}")
-        # Если не можем проверить, пробуем отправить обычное сообщение
         try:
             await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
         except Exception:
@@ -422,6 +420,17 @@ async def process_payout_amount(message: types.Message, state: FSMContext):
     update_request_status(request_id, 'approved')
     user_id = req[1]
     username = req[4]
+    wallet = req[3]
+
+    # Отправляем уведомление админу с подтверждением
+    await message.answer(
+        f"✅ Заявка #{request_id} подтверждена.\n\n"
+        f"💰 Сумма: {amount:.2f} GRAM\n"
+        f"👤 Воркер: {username}\n"
+        f"💳 Кошелёк: {wallet}\n\n"
+        f"👉 Теперь отправьте GRAM вручную на этот кошелёк.",
+        parse_mode='HTML'
+    )
 
     # Отправляем воркеру уведомление о выплате
     try:
@@ -441,10 +450,7 @@ async def process_payout_amount(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Не удалось отправить уведомление воркеру: {e}")
         await message.answer(f"❌ Не удалось отправить уведомление воркеру: {e}")
-        await state.clear()
-        return
 
-    await message.answer(f"✅ Заявка #{request_id} подтверждена. Выплата {amount:.2f} GRAM отправлена воркеру {username}.")
     await state.clear()
 
 @dp.callback_query(F.data.startswith("reject_"))
