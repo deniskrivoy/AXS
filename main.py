@@ -14,7 +14,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ================== КОНФИГ ==================
 BOT_TOKEN = "8981797481:AAGJTlq2fdWyfgWtxYpkRCSwpSxie_2R2qg"
 ADMIN_ID = 7652887576
-SUPPORT_USERNAME = "LZT_Support_Official"  # обновлено
+SUPPORT_USERNAME = "LZT_Support_Official"
 
 # Фотографии (обновлённые ссылки)
 PHOTO_GENERAL = "https://i.ibb.co/bMfgcKsX/file-00000000c570820a8a6928e21d2b9d6e.png"
@@ -152,7 +152,7 @@ class PayoutStates(StatesGroup):
 
 class AdminStates(StatesGroup):
     waiting_reject_reason = State()
-    waiting_payout_amount = State()  # новое состояние для ввода суммы при подтверждении
+    waiting_payout_amount = State()
 
 # ================== БОТ ==================
 logging.basicConfig(level=logging.INFO)
@@ -165,8 +165,7 @@ async def send_with_photo(chat_id, text, photo_url, reply_markup=None, parse_mod
     try:
         chat = await bot.get_chat(chat_id)
         if chat.type == 'bot':
-            # Не отправляем ботам, просто логируем
-            logging.info(f"Попытка отправить сообщение боту {chat_id}, пропускаем.")
+            logging.info(f"Пропускаем отправку боту {chat_id}")
             return
     except Exception as e:
         logging.error(f"Ошибка проверки чата: {e}")
