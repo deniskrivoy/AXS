@@ -25,6 +25,7 @@ DB_NAME = "payouts.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
+    # Создаём таблицу users, если её нет (с колонкой wallet)
     cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -36,6 +37,12 @@ def init_db():
             reg_date TEXT
         )
     ''')
+    # Проверяем, есть ли колонка wallet, и добавляем, если нет
+    cur.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cur.fetchall()]
+    if 'wallet' not in columns:
+        cur.execute("ALTER TABLE users ADD COLUMN wallet TEXT")
+    # Создаём таблицу заявок
     cur.execute('''
         CREATE TABLE IF NOT EXISTS payout_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,7 +283,6 @@ async def process_deal_code(message: types.Message, state: FSMContext):
         await message.answer("❌ Слишком короткий код. Введите код из бота Lolz Market OTC:")
         return
     await state.update_data(deal_code=deal_code)
-    # Проверяем, есть ли кошелёк в данных (если нет - запрашиваем)
     data = await state.get_data()
     if 'wallet' not in data or not data['wallet']:
         await message.answer("💳 Введите ваш <b>TON-кошелёк</b>:", parse_mode='HTML')
