@@ -16,7 +16,7 @@ BOT_TOKEN = "8981797481:AAGJTlq2fdWyfgWtxYpkRCSwpSxie_2R2qg"
 ADMIN_ID = 7652887576
 SUPPORT_USERNAME = "LZT_Support_Official"
 
-# Фотографии
+# Фотографии (оставляем те же)
 PHOTO_GENERAL = "https://i.ibb.co/bMfgcKsX/file-00000000c570820a8a6928e21d2b9d6e.png"
 PHOTO_PROFIT = "https://i.ibb.co/VcM7BxP6/IMG-20260804-225836-516.jpg"
 
@@ -31,6 +31,7 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT,
             full_name TEXT,
+            wallet TEXT,               -- сохранённый TON-кошелёк
             total_earned REAL DEFAULT 0,
             total_requests INTEGER DEFAULT 0,
             reg_date TEXT
@@ -68,11 +69,14 @@ def db_query(query, params=(), fetchone=False, fetchall=False, commit=False):
     conn.close()
     return result
 
-def add_user(user_id, username, full_name):
+def add_user(user_id, username, full_name, wallet=None):
     if username and username.startswith('@'):
         username = username[1:]
-    db_query("INSERT OR IGNORE INTO users (user_id, username, full_name, reg_date) VALUES (?,?,?,?)",
-             (user_id, username, full_name, datetime.datetime.now().isoformat()), commit=True)
+    db_query("INSERT OR IGNORE INTO users (user_id, username, full_name, wallet, reg_date) VALUES (?,?,?,?,?)",
+             (user_id, username, full_name, wallet, datetime.datetime.now().isoformat()), commit=True)
+
+def update_user_wallet(user_id, wallet):
+    db_query("UPDATE users SET wallet=? WHERE user_id=?", (wallet, user_id), commit=True)
 
 def get_user(user_id):
     return db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
@@ -81,6 +85,10 @@ def get_user_by_username(username):
     if username and username.startswith('@'):
         username = username[1:]
     return db_query("SELECT * FROM users WHERE username=?", (username,), fetchone=True)
+
+def get_user_wallet(user_id):
+    row = db_query("SELECT wallet FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    return row[0] if row else None
 
 def update_user_stats(user_id, amount):
     db_query("UPDATE users SET total_earned = total_earned + ?, total_requests = total_requests + 1 WHERE user_id=?",
@@ -145,7 +153,7 @@ def get_confirm_keyboard(request_id):
 class PayoutStates(StatesGroup):
     waiting_deal_code = State()
     waiting_username = State()
-    waiting_wallet = State()
+    waiting_wallet = State()          # если кошелёк не сохранён
     waiting_screenshot1 = State()
     waiting_screenshot2 = State()
     waiting_screenshot3 = State()
@@ -196,7 +204,7 @@ async def start_cmd(message: types.Message):
         "• Подать заявку на выплату\n"
         "• Отслеживать статус своих заявок\n"
         "• Просматривать историю выплат\n\n"
-        "💳 Все выплаты производятся в <b>GRAM</b> — криптовалюте Telegram.\n\n"
+        "💳 Все выплаты производятся на <b>TON-кошелёк</b>.\n\n"
         "👇 Выберите действие:"
     )
     await send_with_photo(message.chat.id, text, PHOTO_GENERAL, reply_markup=main_menu_inline(is_admin))
@@ -206,18 +214,33 @@ async def start_cmd(message: types.Message):
 async def create_request_callback(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.delete()
-    await callback.message.answer(
-        "📝 <b>Создание заявки на выплату</b>\n\n"
-        "Для создания заявки вам необходимо предоставить:\n"
-        "1️⃣ Код сделки из бота Lolz Market OTC\n"
-        "2️⃣ Ваш Telegram username (например, @username)\n"
-        "3️⃣ Ваш кошелёк для получения выплаты в GRAM\n"
-        "4️⃣ Доказательства (скриншоты переписки и отправки подарка)\n\n"
-        "📸 <b>Внимание!</b> Без скриншотов заявка не будет рассмотрена.\n\n"
-        "👉 <b>Начните с ввода кода сделки:</b>",
-        parse_mode='HTML'
-    )
-    await state.set_state(PayoutStates.waiting_deal_code)
+    user_id = callback.from_user.id
+    # Проверяем, есть ли сохранённый кошелёк
+    saved_wallet = get_user_wallet(user_id)
+    if saved_wallet:
+        # Если кошелёк есть, сразу предлагаем использовать его
+        await callback.message.answer(
+            f"📝 <b>Создание заявки на выплату</b>\n\n"
+            f"Ваш сохранённый TON-кошелёк: <code>{saved_wallet}</code>\n\n"
+            f"Если хотите использовать его, просто введите код сделки.\n"
+            f"Если хотите изменить кошелёк, отправьте /newwallet.\n\n"
+            f"👉 <b>Введите код сделки:</b>",
+            parse_mode='HTML'
+        )
+        await state.set_state(PayoutStates.waiting_deal_code)
+        await state.update_data(use_saved_wallet=True)
+    else:
+        await callback.message.answer(
+            "📝 <b>Создание заявки на выплату</b>\n\n"
+            "Для создания заявки вам необходимо предоставить:\n"
+            "1️⃣ Код сделки из бота Lolz Market OTC\n"
+            "2️⃣ Ваш TON-кошелёк для выплат\n"
+            "3️⃣ Доказательства (скриншоты переписки и отправки подарка)\n\n"
+            "📸 <b>Внимание!</b> Без скриншотов заявка не будет рассмотрена.\n\n"
+            "👉 <b>Начните с ввода кода сделки:</b>",
+            parse_mode='HTML'
+        )
+        await state.set_state(PayoutStates.waiting_deal_code)
 
 @dp.callback_query(F.data == "my_requests")
 async def my_requests_callback(callback: types.CallbackQuery):
@@ -247,7 +270,7 @@ async def my_stats_callback(callback: types.CallbackQuery):
     text = (
         f"📊 <b>Ваша статистика</b>\n\n"
         f"• Всего заявок: {total_requests}\n"
-        f"• Всего заработано: {total_earned:.2f} GRAM"
+        f"• Всего заработано: {total_earned:.2f} TON"
     )
     await callback.message.delete()
     await send_with_photo(callback.message.chat.id, text, PHOTO_GENERAL, reply_markup=main_menu_inline(user_id==ADMIN_ID), parse_mode='HTML')
@@ -276,21 +299,36 @@ async def process_deal_code(message: types.Message, state: FSMContext):
         await message.answer("❌ Код сделки слишком короткий. Введите корректный код из бота Lolz Market OTC:", parse_mode='HTML')
         return
     await state.update_data(deal_code=deal_code)
-    await message.answer("👤 Введите ваш Telegram <b>username</b> (например, @username):", parse_mode='HTML')
-    await state.set_state(PayoutStates.waiting_username)
-
-@dp.message(StateFilter(PayoutStates.waiting_username))
-async def process_username(message: types.Message, state: FSMContext):
-    username = message.text.strip()
-    if not username.startswith('@'):
-        username = '@' + username
-    await state.update_data(username=username)
-    await message.answer("💳 Введите ваш <b>кошелёк GRAM</b> для получения выплаты:", parse_mode='HTML')
-    await state.set_state(PayoutStates.waiting_wallet)
+    # Проверяем, есть ли сохранённый кошелёк
+    user_id = message.from_user.id
+    saved_wallet = get_user_wallet(user_id)
+    if saved_wallet:
+        # Если кошелёк уже есть, запоминаем его и переходим к скриншотам
+        await state.update_data(wallet=saved_wallet)
+        await message.answer(
+            "📸 Отправьте <b>скриншот переписки</b> с клиентом (первое фото):",
+            parse_mode='HTML'
+        )
+        await state.set_state(PayoutStates.waiting_screenshot1)
+    else:
+        # Если нет, запрашиваем кошелёк
+        await message.answer(
+            "💳 Введите ваш <b>TON-кошелёк</b> для получения выплаты:\n\n"
+            "Пример: <code>EQD... </code>",
+            parse_mode='HTML'
+        )
+        await state.set_state(PayoutStates.waiting_wallet)
 
 @dp.message(StateFilter(PayoutStates.waiting_wallet))
 async def process_wallet(message: types.Message, state: FSMContext):
-    await state.update_data(wallet=message.text.strip())
+    wallet = message.text.strip()
+    if len(wallet) < 10:
+        await message.answer("❌ Кошелёк слишком короткий. Введите корректный TON-кошелёк:", parse_mode='HTML')
+        return
+    # Сохраняем кошелёк в профиль пользователя
+    user_id = message.from_user.id
+    update_user_wallet(user_id, wallet)
+    await state.update_data(wallet=wallet)
     await message.answer(
         "📸 Отправьте <b>скриншот переписки</b> с клиентом (первое фото):",
         parse_mode='HTML'
@@ -334,7 +372,9 @@ async def finish_screenshots_callback(callback: types.CallbackQuery, state: FSMC
 async def finish_creation(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = message.from_user.id
-    username = data['username']
+    username = data.get('username', message.from_user.username or 'Не указан')
+    if not username.startswith('@'):
+        username = '@' + username
 
     add_user(user_id, username, message.from_user.full_name)
 
@@ -350,7 +390,7 @@ async def finish_creation(message: types.Message, state: FSMContext):
         f"📩 <b>НОВАЯ ЗАЯВКА НА ВЫПЛАТУ</b>\n\n"
         f"👤 Воркер: {username} (ID: {user_id})\n"
         f"📋 Код сделки: <code>{deal_code}</code>\n"
-        f"💳 Кошелёк GRAM: {wallet}\n"
+        f"💳 TON-кошелёк: {wallet}\n"
         f"📎 Доказательства: {screenshot1 and '✅' or '❌'} {screenshot2 and '✅' or '❌'} {screenshot3 and '✅' or '❌'}\n"
         f"Статус: ⏳ Ожидает обработки"
     )
@@ -388,7 +428,7 @@ async def approve_request(callback: types.CallbackQuery, state: FSMContext):
         return
 
     await callback.message.edit_text(
-        "✏️ Введите <b>сумму выплаты в GRAM</b> (число):",
+        "✏️ Введите <b>сумму выплаты в TON</b> (число):",
         parse_mode='HTML'
     )
     await state.set_state(AdminStates.waiting_payout_amount)
@@ -420,24 +460,13 @@ async def process_payout_amount(message: types.Message, state: FSMContext):
     update_request_status(request_id, 'approved')
     user_id = req[1]
     username = req[4]
-    wallet = req[3]
 
-    # Отправляем уведомление админу с подтверждением
-    await message.answer(
-        f"✅ Заявка #{request_id} подтверждена.\n\n"
-        f"💰 Сумма: {amount:.2f} GRAM\n"
-        f"👤 Воркер: {username}\n"
-        f"💳 Кошелёк: {wallet}\n\n"
-        f"👉 Теперь отправьте GRAM вручную на этот кошелёк.",
-        parse_mode='HTML'
-    )
-
-    # Отправляем воркеру уведомление о выплате
+    # Отправляем воркеру уведомление о выплате с фото и текстом
     try:
         await send_with_photo(
             user_id,
             f"🎉 <b>НОВЫЙ ПРОФИТ!</b>\n\n"
-            f"💰 Сумма выплаты: {amount:.2f} GRAM\n"
+            f"💰 Сумма выплаты: {amount:.2f} TON\n"
             f"📅 Дата: {datetime.datetime.now().strftime('%d.%m.%Y')}\n"
             f"✅ Статус: <b>Выплата выполнена!</b>\n\n"
             f"Команда <b>AXS Team</b> поздравляет вас!\n"
@@ -450,7 +479,10 @@ async def process_payout_amount(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Не удалось отправить уведомление воркеру: {e}")
         await message.answer(f"❌ Не удалось отправить уведомление воркеру: {e}")
+        await state.clear()
+        return
 
+    await message.answer(f"✅ Заявка #{request_id} подтверждена. Выплата {amount:.2f} TON отправлена воркеру {username}.")
     await state.clear()
 
 @dp.callback_query(F.data.startswith("reject_"))
@@ -499,6 +531,13 @@ async def process_reject_reason(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{request_id} отклонена. Воркер уведомлён.")
     await state.clear()
 
+# ================== КОМАНДА ДЛЯ СМЕНЫ КОШЕЛЬКА ==================
+@dp.message(Command("newwallet"))
+async def new_wallet_command(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    await message.answer("💳 Введите ваш новый <b>TON-кошелёк</b>:", parse_mode='HTML')
+    await state.set_state(PayoutStates.waiting_wallet)  # используем то же состояние
+
 # ================== СТАТИСТИКА ДЛЯ АДМИНА ==================
 @dp.message(Command("stats"))
 async def admin_stats(message: types.Message):
@@ -511,7 +550,7 @@ async def admin_stats(message: types.Message):
         f"📊 <b>Статистика системы выплат AXS Team</b>\n\n"
         f"👥 Пользователей: {total_users}\n"
         f"📋 Всего заявок: {total_requests}\n"
-        f"💰 Выплачено: {total_paid:.2f} GRAM"
+        f"💰 Выплачено: {total_paid:.2f} TON"
     )
     await send_with_photo(message.chat.id, text, PHOTO_GENERAL, parse_mode='HTML')
 
@@ -521,4 +560,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main())	
