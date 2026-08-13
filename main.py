@@ -16,6 +16,7 @@ BOT_TOKEN = "8981797481:AAGJTlq2fdWyfgWtxYpkRCSwpSxie_2R2qg"
 ADMIN_ID = 7652887576
 SUPPORT_USERNAME = "LZT_Support_Official"
 
+# Фотографии (оставляем те же, что и в первом варианте)
 PHOTO_GENERAL = "https://i.ibb.co/bMfgcKsX/file-00000000c570820a8a6928e21d2b9d6e.png"
 PHOTO_PROFIT = "https://i.ibb.co/VcM7BxP6/IMG-20260804-225836-516.jpg"
 
@@ -25,7 +26,7 @@ DB_NAME = "payouts.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    # Создаём таблицу users, если её нет (с колонкой wallet)
+    # Создаём таблицу users с колонкой wallet
     cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -37,7 +38,7 @@ def init_db():
             reg_date TEXT
         )
     ''')
-    # Проверяем, есть ли колонка wallet, и добавляем, если нет
+    # Проверяем и добавляем колонку wallet, если её нет
     cur.execute("PRAGMA table_info(users)")
     columns = [col[1] for col in cur.fetchall()]
     if 'wallet' not in columns:
@@ -83,9 +84,6 @@ def add_user(user_id, username, full_name, wallet=None):
 
 def update_user_wallet(user_id, wallet):
     db_query("UPDATE users SET wallet=? WHERE user_id=?", (wallet, user_id), commit=True)
-
-def get_user(user_id):
-    return db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
 
 def get_user_wallet(user_id):
     row = db_query("SELECT wallet FROM users WHERE user_id=?", (user_id,), fetchone=True)
@@ -192,7 +190,7 @@ async def start_cmd(message: types.Message):
     is_admin = (user_id == ADMIN_ID)
     text = (
         "🏛 <b>AXS Team Payouts — Система выплат</b>\n\n"
-        "Добро пожаловать в систему выплат команды AXS Team!\n\n"
+        "Добро пожаловать в систему выплат команды <b>AXS Team</b>!\n\n"
         "📊 Здесь вы можете:\n"
         "• Подать заявку на выплату\n"
         "• Отслеживать статус своих заявок\n"
@@ -212,9 +210,9 @@ async def create_request_callback(callback: types.CallbackQuery, state: FSMConte
     if saved_wallet:
         await callback.message.answer(
             f"📝 <b>Создание заявки на выплату</b>\n\n"
-            f"Ваш сохранённый TON-кошелёк: <code>{saved_wallet}</code>\n\n"
-            f"Если хотите использовать его, просто введите код сделки.\n"
-            f"Если хотите изменить кошелёк, отправьте /newwallet.\n\n"
+            f"💳 Ваш сохранённый TON-кошелёк:\n<code>{saved_wallet}</code>\n\n"
+            f"✅ Если хотите использовать его — просто введите <b>код сделки</b>.\n"
+            f"🔄 Если хотите изменить кошелёк — отправьте команду <b>/newwallet</b>.\n\n"
             f"👉 <b>Введите код сделки:</b>",
             parse_mode='HTML'
         )
@@ -223,10 +221,12 @@ async def create_request_callback(callback: types.CallbackQuery, state: FSMConte
     else:
         await callback.message.answer(
             "📝 <b>Создание заявки на выплату</b>\n\n"
-            "1️⃣ Введите код сделки из бота Lolz Market OTC.\n"
-            "2️⃣ Затем введите ваш TON-кошелёк.\n"
-            "3️⃣ Отправьте скриншоты.\n\n"
-            "👉 <b>Введите код сделки:</b>",
+            "Для получения выплаты вам необходимо предоставить:\n"
+            "1️⃣ <b>Код сделки</b> из бота Lolz Market OTC\n"
+            "2️⃣ Ваш <b>TON-кошелёк</b> для получения выплаты\n"
+            "3️⃣ <b>Скриншоты</b> (переписка и отправка подарка)\n\n"
+            "📸 <b>Внимание!</b> Без скриншотов заявка не будет рассмотрена.\n\n"
+            "👉 <b>Начните с ввода кода сделки:</b>",
             parse_mode='HTML'
         )
         await state.set_state(PayoutStates.waiting_deal_code)
@@ -257,8 +257,8 @@ async def my_stats_callback(callback: types.CallbackQuery):
     total_earned, total_requests = get_user_stats(user_id)
     text = (
         f"📊 <b>Ваша статистика</b>\n\n"
-        f"• Всего заявок: {total_requests}\n"
-        f"• Всего заработано: {total_earned:.2f} TON"
+        f"• Всего заявок: <b>{total_requests}</b>\n"
+        f"• Всего заработано: <b>{total_earned:.2f} TON</b>"
     )
     await callback.message.delete()
     await send_with_photo(callback.message.chat.id, text, PHOTO_GENERAL, reply_markup=main_menu_inline(user_id==ADMIN_ID), parse_mode='HTML')
@@ -271,56 +271,66 @@ async def admin_panel_callback(callback: types.CallbackQuery):
         return
     waiting = get_pending_requests_count()
     total = get_total_requests_count()
-    text = f"🔧 <b>Админ-панель</b>\n\n• Ожидают: {waiting}\n• Всего: {total}"
+    text = (
+        f"🔧 <b>Админ-панель</b>\n\n"
+        f"• Ожидают обработки: <b>{waiting}</b>\n"
+        f"• Всего заявок: <b>{total}</b>"
+    )
     await callback.message.delete()
     await send_with_photo(callback.message.chat.id, text, PHOTO_GENERAL, parse_mode='HTML')
 
-# ================== FSM ==================
+# ================== FSM: ЗАПОЛНЕНИЕ ЗАЯВКИ ==================
 @dp.message(StateFilter(PayoutStates.waiting_deal_code))
 async def process_deal_code(message: types.Message, state: FSMContext):
     deal_code = message.text.strip()
     if len(deal_code) < 3:
-        await message.answer("❌ Слишком короткий код. Введите код из бота Lolz Market OTC:")
+        await message.answer("❌ Код сделки слишком короткий. Введите корректный код из бота Lolz Market OTC:", parse_mode='HTML')
         return
     await state.update_data(deal_code=deal_code)
     data = await state.get_data()
     if 'wallet' not in data or not data['wallet']:
-        await message.answer("💳 Введите ваш <b>TON-кошелёк</b>:", parse_mode='HTML')
+        await message.answer("💳 Введите ваш <b>TON-кошелёк</b> для получения выплаты:", parse_mode='HTML')
         await state.set_state(PayoutStates.waiting_wallet)
     else:
-        await message.answer("📸 Отправьте <b>скриншот переписки</b> (1-е фото):", parse_mode='HTML')
+        await message.answer("📸 Отправьте <b>скриншот переписки</b> с клиентом (первое фото):", parse_mode='HTML')
         await state.set_state(PayoutStates.waiting_screenshot1)
 
 @dp.message(StateFilter(PayoutStates.waiting_wallet))
 async def process_wallet(message: types.Message, state: FSMContext):
     wallet = message.text.strip()
     if len(wallet) < 5:
-        await message.answer("❌ Слишком короткий кошелёк. Введите корректный TON-кошелёк:")
+        await message.answer("❌ Кошелёк слишком короткий. Введите корректный TON-кошелёк:", parse_mode='HTML')
         return
     user_id = message.from_user.id
     update_user_wallet(user_id, wallet)
     await state.update_data(wallet=wallet)
-    await message.answer("📸 Отправьте <b>скриншот переписки</b> (1-е фото):", parse_mode='HTML')
+    await message.answer("📸 Отправьте <b>скриншот переписки</b> с клиентом (первое фото):", parse_mode='HTML')
     await state.set_state(PayoutStates.waiting_screenshot1)
 
 @dp.message(StateFilter(PayoutStates.waiting_screenshot1), F.photo)
 async def process_screenshot1(message: types.Message, state: FSMContext):
-    await state.update_data(screenshot1=message.photo[-1].file_id)
-    await message.answer("📸 Отправьте <b>скриншот отправки подарка</b> (2-е фото):", parse_mode='HTML')
+    file_id = message.photo[-1].file_id
+    await state.update_data(screenshot1=file_id)
+    await message.answer("📸 Отправьте <b>скриншот подтверждения отправки подарка</b> (второе фото):", parse_mode='HTML')
     await state.set_state(PayoutStates.waiting_screenshot2)
 
 @dp.message(StateFilter(PayoutStates.waiting_screenshot2), F.photo)
 async def process_screenshot2(message: types.Message, state: FSMContext):
-    await state.update_data(screenshot2=message.photo[-1].file_id)
-    await message.answer("📸 Отправьте дополнительное фото (если есть) или нажмите «Готово».", parse_mode='HTML',
-                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                             [InlineKeyboardButton(text="✅ Готово", callback_data="finish_screenshots")]
-                         ]))
+    file_id = message.photo[-1].file_id
+    await state.update_data(screenshot2=file_id)
+    await message.answer(
+        "📸 Отправьте <b>дополнительное фото</b> (если есть) или нажмите кнопку «Готово».",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Готово", callback_data="finish_screenshots")]
+        ])
+    )
     await state.set_state(PayoutStates.waiting_screenshot3)
 
 @dp.message(StateFilter(PayoutStates.waiting_screenshot3), F.photo)
 async def process_screenshot3(message: types.Message, state: FSMContext):
-    await state.update_data(screenshot3=message.photo[-1].file_id)
+    file_id = message.photo[-1].file_id
+    await state.update_data(screenshot3=file_id)
     await finish_creation(message, state)
 
 @dp.callback_query(F.data == "finish_screenshots")
@@ -339,42 +349,57 @@ async def finish_creation(message: types.Message, state: FSMContext):
 
     deal_code = data['deal_code']
     wallet = data['wallet']
-    s1 = data.get('screenshot1')
-    s2 = data.get('screenshot2')
-    s3 = data.get('screenshot3')
+    screenshot1 = data.get('screenshot1')
+    screenshot2 = data.get('screenshot2')
+    screenshot3 = data.get('screenshot3')
 
     req_id = create_request(user_id, deal_code, wallet, username)
 
     admin_text = (
         f"📩 <b>НОВАЯ ЗАЯВКА НА ВЫПЛАТУ</b>\n\n"
-        f"👤 Воркер: {username} (ID: {user_id})\n"
-        f"📋 Код: <code>{deal_code}</code>\n"
-        f"💳 TON-кошелёк: {wallet}\n"
-        f"📎 Фото: {s1 and '✅' or '❌'} {s2 and '✅' or '❌'} {s3 and '✅' or '❌'}"
+        f"👤 <b>Воркер:</b> {username} (ID: {user_id})\n"
+        f"📋 <b>Код сделки:</b> <code>{deal_code}</code>\n"
+        f"💳 <b>TON-кошелёк:</b> {wallet}\n"
+        f"📎 <b>Доказательства:</b> {screenshot1 and '✅' or '❌'} {screenshot2 and '✅' or '❌'} {screenshot3 and '✅' or '❌'}\n"
+        f"Статус: ⏳ Ожидает обработки"
     )
 
     try:
         await bot.send_message(ADMIN_ID, admin_text, parse_mode='HTML', reply_markup=get_confirm_keyboard(req_id))
-        if s1: await bot.send_photo(ADMIN_ID, s1, caption="📸 Скриншот 1")
-        if s2: await bot.send_photo(ADMIN_ID, s2, caption="📸 Скриншот 2")
-        if s3: await bot.send_photo(ADMIN_ID, s3, caption="📸 Скриншот 3")
+        if screenshot1:
+            await bot.send_photo(ADMIN_ID, screenshot1, caption="📸 Скриншот 1")
+        if screenshot2:
+            await bot.send_photo(ADMIN_ID, screenshot2, caption="📸 Скриншот 2")
+        if screenshot3:
+            await bot.send_photo(ADMIN_ID, screenshot3, caption="📸 Скриншот 3")
     except Exception as e:
-        logging.error(f"Ошибка отправки админу: {e}")
+        logging.error(f"Не удалось отправить админу: {e}")
 
-    await send_with_photo(message.chat.id, "✅ Заявка отправлена. Ожидайте подтверждения.", PHOTO_GENERAL,
-                          reply_markup=main_menu_inline(user_id==ADMIN_ID))
+    await send_with_photo(
+        message.chat.id,
+        "✅ Ваша заявка отправлена на рассмотрение. Ожидайте подтверждения.",
+        PHOTO_GENERAL,
+        reply_markup=main_menu_inline(user_id==ADMIN_ID)
+    )
     await state.clear()
 
-# ================== АДМИН: ПОДТВЕРЖДЕНИЕ ==================
+# ================== ОБРАБОТКА ЗАЯВОК АДМИНОМ ==================
 @dp.callback_query(F.data.startswith("approve_"))
 async def approve_request(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     request_id = int(callback.data.split("_")[1])
     req = get_request(request_id)
-    if not req or req[5] != 'waiting':
-        await callback.message.edit_text("❌ Заявка не найдена или уже обработана.")
+    if not req:
+        await callback.message.edit_text("❌ Заявка не найдена.")
         return
-    await callback.message.edit_text("✏️ Введите <b>сумму выплаты в TON</b> (число):", parse_mode='HTML')
+    if req[5] != 'waiting':
+        await callback.message.edit_text("❌ Эта заявка уже обработана.")
+        return
+
+    await callback.message.edit_text(
+        "✏️ Введите <b>сумму выплаты в TON</b> (число):",
+        parse_mode='HTML'
+    )
     await state.set_state(AdminStates.waiting_payout_amount)
     await state.update_data(request_id=request_id)
 
@@ -386,9 +411,10 @@ async def process_payout_amount(message: types.Message, state: FSMContext):
         return
     try:
         amount = float(message.text.replace(',', '.'))
-        if amount <= 0: raise ValueError
+        if amount <= 0:
+            raise ValueError
     except:
-        await message.answer("❌ Введите положительное число.")
+        await message.answer("❌ Введите положительное число. Например: 150.5")
         return
 
     data = await state.get_data()
@@ -399,42 +425,51 @@ async def process_payout_amount(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
+    # Обновляем статус заявки
     update_request_status(request_id, 'approved')
     user_id = req[1]
     username = req[4]
 
+    # Отправляем воркеру уведомление о выплате с фото и красивым текстом
     try:
         await send_with_photo(
             user_id,
             f"🎉 <b>НОВЫЙ ПРОФИТ!</b>\n\n"
-            f"💰 Сумма: {amount:.2f} TON\n"
-            f"📅 Дата: {datetime.datetime.now().strftime('%d.%m.%Y')}\n"
-            f"✅ Статус: <b>Выплата выполнена!</b>\n\n"
+            f"💰 <b>Сумма выплаты:</b> {amount:.2f} TON\n"
+            f"📅 <b>Дата:</b> {datetime.datetime.now().strftime('%d.%m.%Y')}\n"
+            f"✅ <b>Статус:</b> <i>Выплата выполнена!</i>\n\n"
             f"Команда <b>AXS Team</b> поздравляет вас!\n"
             f"Продолжайте в том же духе! 🚀",
             PHOTO_PROFIT,
             parse_mode='HTML'
         )
+        # Обновляем статистику пользователя
         update_user_stats(user_id, amount)
     except Exception as e:
-        logging.error(f"Ошибка отправки воркеру: {e}")
-        await message.answer(f"❌ Не удалось отправить уведомление: {e}")
+        logging.error(f"Не удалось отправить уведомление воркеру: {e}")
+        await message.answer(f"❌ Не удалось отправить уведомление воркеру: {e}")
         await state.clear()
         return
 
-    await message.answer(f"✅ Заявка #{request_id} подтверждена. Выплата {amount:.2f} TON отправлена {username}.")
+    await message.answer(f"✅ Заявка #{request_id} подтверждена. Выплата {amount:.2f} TON отправлена воркеру {username}.")
     await state.clear()
 
-# ================== АДМИН: ОТКЛОНЕНИЕ ==================
 @dp.callback_query(F.data.startswith("reject_"))
 async def reject_request(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     request_id = int(callback.data.split("_")[1])
     req = get_request(request_id)
-    if not req or req[5] != 'waiting':
-        await callback.message.edit_text("❌ Заявка не найдена или уже обработана.")
+    if not req:
+        await callback.message.edit_text("❌ Заявка не найдена.")
         return
-    await callback.message.edit_text("✏️ Напишите <b>причину отказа</b> (или /cancel):", parse_mode='HTML')
+    if req[5] != 'waiting':
+        await callback.message.edit_text("❌ Эта заявка уже обработана.")
+        return
+
+    await callback.message.edit_text(
+        "✏️ Напишите <b>причину отказа</b> (или отправьте /cancel для отмены):",
+        parse_mode='HTML'
+    )
     await state.set_state(AdminStates.waiting_reject_reason)
     await state.update_data(request_id=request_id)
 
@@ -450,15 +485,25 @@ async def process_reject_reason(message: types.Message, state: FSMContext):
     update_request_status(request_id, 'rejected', reason)
     req = get_request(request_id)
     user_id = req[1]
+
     try:
-        await bot.send_message(user_id, f"❌ <b>Заявка отклонена</b>\n\nПричина: {reason}\n\nПоддержка: @{SUPPORT_USERNAME}", parse_mode='HTML')
-    except:
-        pass
-    await message.answer(f"✅ Заявка #{request_id} отклонена.")
+        await bot.send_message(
+            user_id,
+            f"❌ <b>Ваша заявка отклонена</b>\n\n"
+            f"Причина: {reason}\n\n"
+            f"Если у вас есть вопросы, обратитесь к поддержке @{SUPPORT_USERNAME}.",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logging.error(f"Не удалось уведомить воркера: {e}")
+
+    await message.answer(f"✅ Заявка #{request_id} отклонена. Воркер уведомлён.")
+    await state.clear()
 
 # ================== КОМАНДА ДЛЯ СМЕНЫ КОШЕЛЬКА ==================
 @dp.message(Command("newwallet"))
 async def new_wallet_command(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
     await message.answer("💳 Введите ваш новый <b>TON-кошелёк</b>:", parse_mode='HTML')
     await state.set_state(PayoutStates.waiting_wallet)
 
@@ -470,7 +515,12 @@ async def admin_stats(message: types.Message):
     total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     total_requests = db_query("SELECT COUNT(*) FROM payout_requests", fetchone=True)[0]
     total_paid = db_query("SELECT SUM(total_earned) FROM users", fetchone=True)[0] or 0
-    text = f"📊 <b>Статистика</b>\n\n👥 Пользователей: {total_users}\n📋 Заявок: {total_requests}\n💰 Выплачено: {total_paid:.2f} TON"
+    text = (
+        f"📊 <b>Статистика системы выплат AXS Team</b>\n\n"
+        f"👥 Пользователей: {total_users}\n"
+        f"📋 Всего заявок: {total_requests}\n"
+        f"💰 Выплачено: {total_paid:.2f} TON"
+    )
     await send_with_photo(message.chat.id, text, PHOTO_GENERAL, parse_mode='HTML')
 
 # ================== ЗАПУСК ==================
